@@ -294,7 +294,23 @@ if __name__ == '__main__':
                 sources_cuda=[
                     'src/cuda/carafe_naive_cuda.cpp',
                     'src/cuda/carafe_naive_cuda_kernel.cu'
-                ])
+                ]),
+            make_cuda_ext(
+                name='top_pool',
+                module='mmdet.ops.center_pool',
+                sources=['src/top_pool.cpp']),
+            make_cuda_ext(
+                name='bottom_pool',
+                module='mmdet.ops.center_pool',
+                sources=['src/bottom_pool.cpp']),
+            make_cuda_ext(
+                name='left_pool',
+                module='mmdet.ops.center_pool',
+                sources=['src/left_pool.cpp']),
+            make_cuda_ext(
+                name='right_pool',
+                module='mmdet.ops.center_pool',
+                sources=['src/right_pool.cpp']),
         ],
         cmdclass={'build_ext': BuildExtension},
         zip_safe=False)

@@ -14,6 +14,7 @@ from .roi_pool import RoIPool, roi_pool
 from .sigmoid_focal_loss import SigmoidFocalLoss, sigmoid_focal_loss
 from .utils import get_compiler_version, get_compiling_cuda_version
 from .wrappers import Conv2d, ConvTranspose2d, Linear, MaxPool2d
+from .center_pool import TopPool, BottomPool, LeftPool, RightPool
 
 __all__ = [
     'nms', 'soft_nms', 'RoIAlign', 'roi_align', 'RoIPool', 'roi_pool',
@@ -24,5 +25,6 @@ __all__ = [
     'MaskedConv2d', 'ContextBlock', 'GeneralizedAttention', 'NonLocal2D',
     'get_compiler_version', 'get_compiling_cuda_version', 'ConvWS2d',
     'conv_ws_2d', 'build_plugin_layer', 'batched_nms', 'Conv2d',
-    'ConvTranspose2d', 'MaxPool2d', 'Linear'
+    'ConvTranspose2d', 'MaxPool2d', 'Linear',
+    'TopPool', 'BottomPool', 'LeftPool', 'RightPool',
 ]

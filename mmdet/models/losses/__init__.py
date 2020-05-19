@@ -1,4 +1,5 @@
 from .accuracy import Accuracy, accuracy
+from .ae_loss import AELoss
 from .balanced_l1_loss import BalancedL1Loss, balanced_l1_loss
 from .cross_entropy_loss import (CrossEntropyLoss, binary_cross_entropy,
                                  cross_entropy, mask_cross_entropy)
@@ -16,5 +17,5 @@ __all__ = [
     'FocalLoss', 'smooth_l1_loss', 'SmoothL1Loss', 'balanced_l1_loss',
     'BalancedL1Loss', 'mse_loss', 'MSELoss', 'iou_loss', 'bounded_iou_loss',
     'IoULoss', 'BoundedIoULoss', 'GIoULoss', 'GHMC', 'GHMR', 'reduce_loss',
-    'weight_reduce_loss', 'weighted_loss', 'L1Loss', 'l1_loss'
+    'weight_reduce_loss', 'weighted_loss', 'L1Loss', 'l1_loss', 'AELoss',
 ]
