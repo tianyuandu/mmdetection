@@ -11,7 +11,6 @@ model = dict(
         nstack=2,
         dims=[256, 256, 384, 384, 384, 512],
         modules=[2, 2, 2, 2, 2, 4],
-        out_dim=80,
         norm_cfg=dict(type='BN', requires_grad=True)),
     neck=None,
     bbox_head=dict(

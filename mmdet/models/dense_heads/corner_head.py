@@ -28,7 +28,8 @@ class BDPool(nn.Module):
 
         self.conv1 = ConvModule(
             in_channels, in_channels, 1, norm_cfg=norm_cfg, act_cfg=None)
-        self.conv2 = ConvModule(in_channels, in_channels, 3, padding=1)
+        self.conv2 = ConvModule(
+            in_channels, in_channels, 3, padding=1, norm_cfg=norm_cfg)
 
         self.pool1 = pool1()
         self.pool2 = pool2()
@@ -234,8 +235,7 @@ class CornerHead(nn.Module):
             img_meta=img_metas[0],
             K=self.test_cfg.nms_topk,
             kernel=self.test_cfg.nms_pool_kernel,
-            ae_threshold=self.test_cfg.ae_threshold,
-            num_dets=self.test_cfg.max_per_img)
+            ae_threshold=self.test_cfg.ae_threshold)
 
         if rescale:
             batch_bboxes /= img_metas[0]['scale_factor']

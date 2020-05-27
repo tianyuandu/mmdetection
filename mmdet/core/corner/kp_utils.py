@@ -121,8 +121,8 @@ def decode_heatmap(tl_heat,
     dist_inds = (dists > ae_threshold)
 
     # reject boxes based on widths and heights
-    width_inds = (br_xs < tl_xs)
-    height_inds = (br_ys < tl_ys)
+    width_inds = (br_xs <= tl_xs)
+    height_inds = (br_ys <= tl_ys)
 
     scores[cls_inds] = -1
     scores[dist_inds] = -1

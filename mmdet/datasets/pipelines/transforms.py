@@ -499,6 +499,8 @@ class RandomCenterCropPad(object):
 
                     mask = self._filter_boxes(patch, boxes)
                     if not mask.any():
+                        import time
+                        time.sleep(0.05)
                         continue
 
                     results['img'] = cropped_img
