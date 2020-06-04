@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import numpy as np
 
 from mmdet.core.corner import corner_target, decode_heatmap
 from mmdet.ops import soft_nms, TopPool, BottomPool, LeftPool, RightPool
@@ -12,6 +11,7 @@ from ..builder import HEADS, build_loss
 class BDPool(nn.Module):
     """ Bi-Directional Pooling Module (TopLeft, BottomRight, etc.)
     """
+
     def __init__(self,
                  in_channels,
                  pool1,
@@ -53,19 +53,20 @@ class CornerHead(nn.Module):
     Official github repo: https://github.com/princeton-vl/CornerNet
     Paper : https://arxiv.org/abs/1808.01244
     """
-    def __init__(self,
-                 num_classes,
-                 in_channels,
-                 emb_dim=1,
-                 off_dim=2,
-                 train_cfg=None,
-                 test_cfg=None,
-                 loss_hmp=dict(
-                     type='FocalLoss2D', alpha=2.0, gamma=4.0, loss_weight=1),
-                 loss_emb=dict(
-                     type='AELoss', pull_weight=0.25, push_weight=0.25),
-                 loss_off=dict(
-                     type='SmoothL1Loss', beta=1.0, loss_weight=1)):
+    def __init__(
+        self,
+        num_classes,
+        in_channels,
+        emb_dim=1,
+        off_dim=2,
+        train_cfg=None,
+        test_cfg=None,
+        loss_hmp=dict(
+            type='FocalLoss2D', alpha=2.0, gamma=4.0, loss_weight=1),
+        loss_emb=dict(
+            type='AELoss', pull_weight=0.25, push_weight=0.25),
+        loss_off=dict(
+            type='SmoothL1Loss', beta=1.0, loss_weight=1)):
         super(CornerHead, self).__init__()
         self.num_classes = num_classes - 1
         self.in_channels = in_channels
@@ -82,6 +83,7 @@ class CornerHead(nn.Module):
         self._init_layers()
 
     def _init_layers(self):
+
         def make_kp_layer(out_dim, cnv_dim=256, curr_dim=256):
             return nn.Sequential(
                 ConvModule(cnv_dim, curr_dim, 3, padding=1),
@@ -154,29 +156,42 @@ class CornerHead(nn.Module):
 
         return tl_result, br_result, tl_result_is, br_result_is
 
-    def loss(self, tl, br, tl_is, br_is, gt_bboxes, gt_labels, img_metas,
+    def loss(self, 
+             tl,
+             br,
+             tl_is,
+             br_is,
+             gt_bboxes,
+             gt_labels,
+             img_metas,
              gt_bboxes_ignore=None):
-        wh = img_metas[0]['img_shape'][:2]
+        wh = img_metas[0]['pad_shape'][:2]
         targets = corner_target(gt_bboxes, gt_labels, tl, wh, self.num_classes)
 
         gt_tl_hmp, gt_br_hmp, gt_tl_off, gt_br_off, match = targets
 
-        pd_tl_hmp = tl[:, :self.num_classes, :, :].sigmoid()
-        pd_tl_emb = tl[:, self.num_classes:self.num_classes+self.emb_dim, :, :]
+        pd_tl_hmp = tl[:, :self.num_classes, :, :].sigmoid().clamp(
+            min=1e-4, max=1 - 1e-4)
+        pd_tl_emb = tl[:,
+                       self.num_classes:self.num_classes+self.emb_dim, :, :]
         pd_tl_off = tl[:, -self.offset_dim:, :, :]
 
-        pd_br_hmp = br[:, :self.num_classes, :, :].sigmoid()
-        pd_br_emb = br[:, self.num_classes:self.num_classes+self.emb_dim, :, :]
+        pd_br_hmp = br[:, :self.num_classes, :, :].sigmoid().clamp(
+            min=1e-4, max=1 - 1e-4)
+        pd_br_emb = br[:,
+                       self.num_classes:self.num_classes+self.emb_dim, :, :]
         pd_br_off = br[:, -self.offset_dim:, :, :]
 
-        pd_tl_hmp_is = tl_is[:, :self.num_classes, :, :].sigmoid()
-        pd_tl_emb_is = tl_is[
-            :, self.num_classes:self.num_classes+self.emb_dim, :, :]
+        pd_tl_hmp_is = tl_is[:, :self.num_classes, :, :].sigmoid().clamp(
+            min=1e-4, max=1 - 1e-4)
+        pd_tl_emb_is = tl_is[:, self.num_classes:self.num_classes +
+                             self.emb_dim, :, :]
         pd_tl_off_is = tl_is[:, -self.offset_dim:, :, :]
 
-        pd_br_hmp_is = br_is[:, :self.num_classes, :, :].sigmoid()
-        pd_br_emb_is = br_is[
-            :, self.num_classes:self.num_classes+self.emb_dim, :, :]
+        pd_br_hmp_is = br_is[:, :self.num_classes, :, :].sigmoid().clamp(
+            min=1e-4, max=1 - 1e-4)
+        pd_br_emb_is = br_is[:, self.num_classes:self.num_classes +
+                             self.emb_dim, :, :]
         pd_br_off_is = br_is[:, -self.offset_dim:, :, :]
 
         # Detection loss
@@ -215,16 +230,48 @@ class CornerHead(nn.Module):
             push_loss=push_loss,
             offset_loss=off_loss)
 
-    def get_bboxes(self, tl, br, tl_is, br_is, img_metas, rescale=False):
+    def get_bboxes(self,
+                   tl,
+                   br,
+                   tl_is,
+                   br_is,
+                   img_metas,
+                   rescale=False,
+                   with_nms=True):
+        assert tl.shape[0] == tl_is.shape[0] == len(img_metas)
+        assert br.shape[0] == br_is.shape[0] == len(img_metas)
+        result_list = []
+        for img_id in range(len(img_metas)):
+            result_list.append(
+                self._get_bboxes_single(
+                    tl[img_id:img_id + 1, :],
+                    br[img_id:img_id + 1, :],
+                    tl_is[img_id:img_id + 1, :],
+                    br_is[img_id:img_id + 1, :],
+                    img_metas[img_id],
+                    rescale=rescale,
+                    with_nms=with_nms))
+
+        return result_list
+
+    def _get_bboxes_single(self,
+                           tl,
+                           br,
+                           tl_is,
+                           br_is,
+                           img_meta,
+                           rescale=False,
+                           with_nms=True):
         tl_heat = tl[:, :self.num_classes, :, :]
-        tl_tag = tl[:, self.num_classes:self.num_classes+self.emb_dim, :, :]
+        tl_tag = tl[:, self.num_classes:self.num_classes + self.emb_dim, :, :]
         tl_regr = tl[:, -self.offset_dim:, :, :]
         br_heat = br[:, :self.num_classes, :, :]
-        br_tag = br[:, self.num_classes:self.num_classes+self.emb_dim, :, :]
+        br_tag = br[:, self.num_classes:self.num_classes + self.emb_dim, :, :]
         br_regr = br[:, -self.offset_dim:, :, :]
 
-        if len(tl_heat) == 2:
-            img_metas = img_metas[0]
+        if isinstance(img_meta, (list, tuple)):
+            img_meta = img_meta[0]
+
         batch_bboxes, batch_scores, batch_clses = decode_heatmap(
             tl_heat=tl_heat.sigmoid(),
             br_heat=br_heat.sigmoid(),
@@ -232,68 +279,59 @@ class CornerHead(nn.Module):
             br_tag=br_tag,
             tl_regr=tl_regr,
             br_regr=br_regr,
-            img_meta=img_metas[0],
+            img_meta=img_meta,
             K=self.test_cfg.nms_topk,
             kernel=self.test_cfg.nms_pool_kernel,
             ae_threshold=self.test_cfg.ae_threshold)
 
         if rescale:
-            batch_bboxes /= img_metas[0]['scale_factor']
+            batch_bboxes /= img_meta['scale_factor']
 
-        batch_bboxes = batch_bboxes.view([-1, 4]).unsqueeze(0)
-        batch_scores = batch_scores.view([-1, 1]).unsqueeze(0)
-        batch_clses = batch_clses.view([-1, 1]).unsqueeze(0)
-        result_list = []
-        for img_id in range(len(img_metas)):
-            bboxes = batch_bboxes[img_id]
-            scores = batch_scores[img_id]
-            clses = batch_clses[img_id]
+        bboxes = batch_bboxes.view([-1, 4])
+        scores = batch_scores.view([-1, 1])
+        clses = batch_clses.view([-1, 1])
 
-            scores_n = scores.cpu().numpy()
-            idx = scores_n.argsort(0)[::-1]
-            idx = torch.Tensor(idx.astype(float)).long()
+        idx = scores.argsort(dim=0, descending=True)
+        bboxes = bboxes[idx].view([-1, 4])
+        scores = scores[idx].view(-1)
+        clses = clses[idx].view(-1)
 
-            bboxes = bboxes[idx].squeeze()
-            scores = scores[idx].view(-1)
-            clses = clses[idx].view(-1)
+        detections = torch.cat([bboxes, scores.unsqueeze(-1)], -1)
+        keepinds = (detections[:, -1] > -0.1)  # 0.05
+        detections = detections[keepinds]
+        labels = clses[keepinds]
 
-            detections = torch.cat([bboxes, scores.unsqueeze(-1)], -1)
-            keepinds = (detections[:, -1] > -0.1)  # 0.05
-            detections = detections[keepinds]
-            labels = clses[keepinds]
+        if with_nms:
+            detections, labels = self._bboxes_nms(detections, labels,
+                                                  self.test_cfg,
+                                                  self.num_classes)
 
-            out_bboxes = []
-            out_labels = []
-            for i in range(self.num_classes):
-                keepinds = (labels == i)
-                nms_detections = detections[keepinds]
-                if nms_detections.size(0) == 0:
-                    continue
-                nms_detections, _ = soft_nms(nms_detections, 0.5, 'gaussian')
+        return detections, labels
 
-                out_bboxes.append(nms_detections)
-                out_labels += [i for _ in range(len(nms_detections))]
+    def _bboxes_nms(self, bboxes, labels, cfg, num_classes=80):
+        out_bboxes = []
+        out_labels = []
+        for i in range(num_classes):
+            keepinds = (labels == i)
+            nms_detections = bboxes[keepinds]
+            if nms_detections.size(0) == 0:
+                continue
+            nms_detections, _ = soft_nms(nms_detections, 0.5, 'gaussian')
 
-            if len(out_bboxes) > 0:
-                out_bboxes = torch.cat(out_bboxes)
-                # out_labels = 1 + torch.Tensor(out_labels)
-                out_labels = torch.Tensor(out_labels)
-            else:
-                out_bboxes = torch.Tensor(out_bboxes)
-                out_labels = torch.Tensor(out_labels)
+            out_bboxes.append(nms_detections)
+            out_labels += [i for _ in range(len(nms_detections))]
 
-            # out_labels = 1+torch.Tensor(out_labels)
+        if len(out_bboxes) > 0:
+            out_bboxes = torch.cat(out_bboxes)
+            out_labels = torch.Tensor(out_labels)
+        else:
+            out_bboxes = torch.Tensor(out_bboxes)
+            out_labels = torch.Tensor(out_labels)
 
-            if len(out_bboxes) > 0:
-                out_bboxes_np = out_bboxes.cpu().numpy()
-                out_labels_np = out_labels.cpu().numpy()
-                max_det = self.test_cfg.max_per_img
-                idx = np.argsort(out_bboxes_np[:, -1])[::-1][:max_det]
-                out_bboxes_np = out_bboxes_np[idx, :]
-                out_labels_np = out_labels_np[idx]
-                out_bboxes = torch.Tensor(out_bboxes_np).type_as(out_bboxes)
-                out_labels = torch.Tensor(out_labels_np).type_as(out_labels)
+        if len(out_bboxes) > 0:
+            idx = torch.argsort(out_bboxes[:, -1], descending=True)
+            idx = idx[:cfg.max_per_img]
+            out_bboxes = out_bboxes[idx]
+            out_labels = out_labels[idx]
 
-            result_list.append((out_bboxes, out_labels))
-            # result_list.append((detections, labels))
-        return result_list
+        return out_bboxes, out_labels
