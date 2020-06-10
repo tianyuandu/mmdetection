@@ -55,7 +55,7 @@ def decode_heatmap(tl_heat,
                    ae_threshold=0.5,
                    num_dets=1000):
     batch, _, height, width = tl_heat.size()
-    inp_h, inp_w, _ = img_meta['img_shape']
+    inp_h, inp_w, _ = img_meta['pad_shape']
 
     # perform nms on heatmaps
     tl_heat = _nms(tl_heat, kernel=kernel)

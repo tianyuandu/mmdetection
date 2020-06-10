@@ -499,12 +499,11 @@ class RandomCenterCropPad(object):
 
                     mask = self._filter_boxes(patch, boxes)
                     if not mask.any():
-                        import time
-                        time.sleep(0.05)
                         continue
 
                     results['img'] = cropped_img
                     results['img_shape'] = cropped_img.shape
+                    results['pad_shape'] = cropped_img.shape
                     # results['border'] = border
 
                     x0, y0, x1, y1 = patch
@@ -547,6 +546,7 @@ class RandomCenterCropPad(object):
                     (int(w * scale_factor), int(h * scale_factor)),
                     return_scale=False)
                 h, w, c = img.shape
+            results['img_shape'] = img.shape
 
             if self.pad_mode[0] in ['logical-or']:
                 inp_h = h | self.pad_mode[1]
@@ -562,7 +562,7 @@ class RandomCenterCropPad(object):
             cropped_img, border, _ = self._crop_image(
                 img, [h // 2, w // 2], [inp_h, inp_w])
             results['img'] = cropped_img
-            results['img_shape'] = cropped_img.shape
+            results['pad_shape'] = cropped_img.shape
             results['border'] = border
             return results
 

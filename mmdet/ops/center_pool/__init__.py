@@ -1,21 +1,21 @@
 from torch import nn
 from torch.autograd import Function
 
-from . import center_pool_ext
+from . import top_pool, bottom_pool, left_pool, right_pool
 
 
 class TopPoolFunction(Function):
 
     @staticmethod
     def forward(ctx, input):
-        output = center_pool_ext.top_forward(input)[0]
+        output = top_pool.forward(input)[0]
         ctx.save_for_backward(input)
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         input = ctx.saved_variables[0]
-        output = center_pool_ext.top_backward(input, grad_output)[0]
+        output = top_pool.backward(input, grad_output)[0]
         return output
 
 
@@ -23,14 +23,14 @@ class BottomPoolFunction(Function):
 
     @staticmethod
     def forward(ctx, input):
-        output = center_pool_ext.bottom_forward(input)[0]
+        output = bottom_pool.forward(input)[0]
         ctx.save_for_backward(input)
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         input = ctx.saved_variables[0]
-        output = center_pool_ext.bottom_backward(input, grad_output)[0]
+        output = bottom_pool.backward(input, grad_output)[0]
         return output
 
 
@@ -38,14 +38,14 @@ class LeftPoolFunction(Function):
 
     @staticmethod
     def forward(ctx, input):
-        output = center_pool_ext.left_forward(input)[0]
+        output = left_pool.forward(input)[0]
         ctx.save_for_backward(input)
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         input = ctx.saved_variables[0]
-        output = center_pool_ext.left_backward(input, grad_output)[0]
+        output = left_pool.backward(input, grad_output)[0]
         return output
 
 
@@ -53,14 +53,14 @@ class RightPoolFunction(Function):
 
     @staticmethod
     def forward(ctx, input):
-        output = center_pool_ext.right_forward(input)[0]
+        output = right_pool.forward(input)[0]
         ctx.save_for_backward(input)
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         input = ctx.saved_variables[0]
-        output = center_pool_ext.right_backward(input, grad_output)[0]
+        output = right_pool.backward(input, grad_output)[0]
         return output
 
 
