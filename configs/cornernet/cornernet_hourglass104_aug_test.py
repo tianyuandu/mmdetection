@@ -15,10 +15,11 @@ model = dict(
     neck=None,
     bbox_head=dict(
         type='CornerHead',
-        num_classes=81,
+        num_classes=80,
         in_channels=256,
-        emb_dim=1,
-        off_dim=2,
+        corner_emb_channels=1,
+        with_corner_offset=True,
+        feat_num_levels=2,
         loss_hmp=dict(type='FocalLoss2D', alpha=2.0, gamma=4.0, loss_weight=1),
         loss_emb=dict(type='AELoss', pull_weight=0.25, push_weight=0.25),
         loss_off=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1)))

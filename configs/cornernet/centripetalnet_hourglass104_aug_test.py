@@ -14,15 +14,19 @@ model = dict(
         norm_cfg=dict(type='BN', requires_grad=True)),
     neck=None,
     bbox_head=dict(
-        type='CornerHead',
+        type='CentripetalHead',
         num_classes=80,
         in_channels=256,
-        corner_emb_channels=1,
+        corner_emb_channels=0,
         with_corner_offset=True,
         feat_num_levels=2,
         loss_hmp=dict(type='FocalLoss2D', alpha=2.0, gamma=4.0, loss_weight=1),
-        loss_emb=dict(type='AELoss', pull_weight=0.25, push_weight=0.25),
-        loss_off=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1)))
+        loss_emb=None,
+        loss_off=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1),
+        loss_guiding_shift=dict(
+            type='SmoothL1Loss', beta=1.0, loss_weight=0.05),
+        loss_centripetal_shift=dict(
+            type='SmoothL1Loss', beta=1.0, loss_weight=1)))
 # data settings
 dataset_type = 'CocoDataset'
 data_root = '/mnt/lustre/share/DSK/datasets/mscoco2017/'
@@ -55,7 +59,7 @@ test_pipeline = [
     dict(
         type='MultiScaleFlipAug',
         ratio=1.0,
-        flip=False,
+        flip=True,
         transforms=[
             dict(
                 type='RandomCenterCropPad',
@@ -101,7 +105,7 @@ test_cfg = dict(
     score_thr=0.05,
     max_per_img=100)
 # optimizer
-optimizer = dict(type='Adam', lr=0.0005)
+optimizer = dict(type='Adam', lr=0.00005)
 optimizer_config = dict(grad_clip=dict(max_norm=35, norm_type=2))
 # learning policy
 lr_config = dict(
@@ -109,6 +113,6 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=500,
     warmup_ratio=1.0 / 3,
-    step=[180])
+    step=[190])
 total_epochs = 210
 find_unused_parameters = True

@@ -50,7 +50,7 @@ class BDPool(nn.Module):
 
 @HEADS.register_module()
 class CornerHead(nn.Module):
-    """CornerNet: Detecting Objects as Paired Keypoints
+    """CornerNet: Detecting Objects as Paired Keypoints.
     Official github repo: https://github.com/princeton-vl/CornerNet
     Paper : https://arxiv.org/abs/1808.01244
     """
@@ -58,8 +58,8 @@ class CornerHead(nn.Module):
         self,
         num_classes,
         in_channels,
-        emb_dim=1,
-        off_dim=2,
+        corner_emb_channels=1,
+        with_corner_offset=True,
         feat_num_levels=2,
         train_cfg=None,
         test_cfg=None,
@@ -70,12 +70,12 @@ class CornerHead(nn.Module):
         loss_off=dict(
             type='SmoothL1Loss', beta=1.0, loss_weight=1)):
         super(CornerHead, self).__init__()
-        self.num_classes = num_classes - 1
+        self.num_classes = num_classes
         self.in_channels = in_channels
-        self.emb_dim = emb_dim
-        self.with_corner_emb = self.emb_dim > 0
-        self.offset_dim = off_dim
-        self.with_corner_off = self.offset_dim > 0
+        self.corner_emb_channels = corner_emb_channels
+        self.with_corner_emb = self.corner_emb_channels > 0
+        self.with_corner_offset = with_corner_offset
+        self.corner_offset_channels = 2
         self.feat_num_levels = feat_num_levels
         self.loss_hmp = build_loss(loss_hmp) if loss_hmp is not None else None
         self.loss_emb = build_loss(loss_emb) if loss_emb is not None else None
@@ -85,45 +85,45 @@ class CornerHead(nn.Module):
 
         self._init_layers()
 
-    def _make_layers(self, out_channel, in_channel=256, feat_channel=256):
+    def _make_layers(self, out_channels, in_channels=256, feat_channels=256):
+        if out_channels == 0:
+            return nn.Sequential()
+        else:
             return nn.Sequential(
-                ConvModule(in_channel, feat_channel, 3, padding=1),
-                nn.Conv2d(feat_channel, out_channel, (1, 1)))
+                ConvModule(in_channels, feat_channels, 3, padding=1),
+                nn.Conv2d(feat_channels, out_channels, (1, 1)))
 
-    def _init_layers(self):
-
+    def _init_corner_kpt_layers(self):
         self.tl_pool, self.br_pool = nn.ModuleList(), nn.ModuleList()
         self.tl_heat, self.br_heat = nn.ModuleList(), nn.ModuleList()
-        self.tl_emb, self.br_emb = nn.ModuleList(), nn.ModuleList()
         self.tl_off, self.br_off = nn.ModuleList(), nn.ModuleList()
 
         for _ in range(self.feat_num_levels):
             self.tl_pool.append(BDPool(self.in_channels, TopPool, LeftPool))
             self.br_pool.append(BDPool(self.in_channels, BottomPool, RightPool))
 
-            self.tl_heat.append(self._make_layers(out_channel=self.num_classes))
-            self.br_heat.append(self._make_layers(out_channel=self.num_classes))
+            self.tl_heat.append(self._make_layers(out_channels=self.num_classes))
+            self.br_heat.append(self._make_layers(out_channels=self.num_classes))
 
-            if self.with_corner_emb:
-                self.tl_emb.append(self._make_layers(out_channel=self.emb_dim))
-                self.br_emb.append(self._make_layers(out_channel=self.emb_dim))
+            if self.with_corner_offset:
+                self.tl_off.append(
+                    self._make_layers(out_channels=self.corner_offset_channels))
+                self.br_off.append(
+                    self._make_layers(out_channels=self.corner_offset_channels))
 
-            if self.with_corner_off:
-                self.tl_off.append(self._make_layers(out_channel=self.offset_dim))
-                self.br_off.append(self._make_layers(out_channel=self.offset_dim))
+    def _init_corner_emb_layers(self):
+        self.tl_emb, self.br_emb = nn.ModuleList(), nn.ModuleList()
 
-        # # intermediate supervision
-        # self.tl_pool_is = BDPool(self.in_channels, TopPool, LeftPool)
-        # self.br_pool_is = BDPool(self.in_channels, BottomPool, RightPool)
+        for _ in range(self.feat_num_levels):
+            self.tl_emb.append(
+                self._make_layers(out_channels=self.corner_emb_channels))
+            self.br_emb.append(
+                self._make_layers(out_channels=self.corner_emb_channels))
 
-        # self.tl_heat_is = self._make_layers(out_channel=self.num_classes)
-        # self.br_heat_is = self._make_layers(out_channel=self.num_classes)
-
-        # self.tl_emb_is = self._make_layers(out_channel=self.emb_dim)
-        # self.br_emb_is = self._make_layers(out_channel=self.emb_dim)
-
-        # self.tl_off_is = self._make_layers(out_channel=self.offset_dim)
-        # self.br_off_is = self._make_layers(out_channel=self.offset_dim)
+    def _init_layers(self):
+        self._init_corner_kpt_layers()
+        if self.with_corner_emb:
+            self._init_corner_emb_layers()
 
     def init_weights(self):
         """
@@ -138,8 +138,7 @@ class CornerHead(nn.Module):
         lvl_ind = list(range(self.feat_num_levels))
         return multi_apply(self.forward_single, feats, lvl_ind)
 
-    def forward_single(self, x, lvl_ind):
-
+    def forward_single(self, x, lvl_ind, return_pool=False):
         tl_pool = self.tl_pool[lvl_ind](x)
         tl_heat = self.tl_heat[lvl_ind](tl_pool)
         br_pool = self.br_pool[lvl_ind](x)
@@ -151,11 +150,16 @@ class CornerHead(nn.Module):
             br_emb = self.br_emb[lvl_ind](br_pool)
 
         tl_off, br_off = None, None
-        if self.with_corner_off:
+        if self.with_corner_offset:
             tl_off = self.tl_off[lvl_ind](tl_pool)
             br_off = self.br_off[lvl_ind](br_pool)
 
-        return tl_heat, br_heat, tl_emb, br_emb, tl_off, br_off
+        result_list = [tl_heat, br_heat, tl_emb, br_emb, tl_off, br_off]
+        if return_pool:
+            result_list.append(tl_pool)
+            result_list.append(br_pool)
+
+        return result_list
 
     def loss(self,
              tl_heats,
@@ -171,7 +175,7 @@ class CornerHead(nn.Module):
         wh = img_metas[0]['pad_shape'][:2]
 
         targets = corner_target(gt_bboxes, gt_labels, tl_heats[-1], wh, self.num_classes)
-        multi_targets = [targets for _ in range(len(tl_heats))]
+        mlvl_targets = [targets for _ in range(len(tl_heats))]
         det_losses, pull_losses, push_losses, off_losses = multi_apply(
             self.loss_single,
             tl_heats,
@@ -180,13 +184,12 @@ class CornerHead(nn.Module):
             br_embs,
             tl_offs,
             br_offs,
-            multi_targets)
-        loss_dict = dict()
-        loss_dict.update({'det_loss': det_losses})
+            mlvl_targets)
+        loss_dict = dict(det_loss=det_losses)
         if self.with_corner_emb:
             loss_dict.update({'pull_loss': pull_losses})
             loss_dict.update({'push_loss': push_losses})
-        if self.with_corner_off:
+        if self.with_corner_offset:
             loss_dict.update({'off_loss': off_losses})
         return loss_dict
 
@@ -205,7 +208,7 @@ class CornerHead(nn.Module):
             pull_loss, push_loss = None, None
 
         # Offset loss
-        if self.with_corner_off:
+        if self.with_corner_offset:
             tl_off_mask = gt_tl_hmp.eq(1).sum(1).gt(0).unsqueeze(1).type_as(
                 gt_tl_hmp)
             br_off_mask = gt_br_hmp.eq(1).sum(1).gt(0).unsqueeze(1).type_as(
@@ -222,23 +225,26 @@ class CornerHead(nn.Module):
         return det_loss, pull_loss, push_loss, off_loss
 
     def get_bboxes(self,
-                   tl,
-                   br,
-                   tl_is,
-                   br_is,
+                   tl_heats,
+                   br_heats,
+                   tl_embs,
+                   br_embs,
+                   tl_offs,
+                   br_offs,
                    img_metas,
                    rescale=False,
                    with_nms=True):
-        assert tl.shape[0] == tl_is.shape[0] == len(img_metas)
-        assert br.shape[0] == br_is.shape[0] == len(img_metas)
+        assert tl_heats[-1].shape[0] == br_heats[-1].shape[0] == len(img_metas)
         result_list = []
         for img_id in range(len(img_metas)):
             result_list.append(
                 self._get_bboxes_single(
-                    tl[img_id:img_id + 1, :],
-                    br[img_id:img_id + 1, :],
-                    tl_is[img_id:img_id + 1, :],
-                    br_is[img_id:img_id + 1, :],
+                    tl_heats[-1][img_id:img_id + 1, :],
+                    br_heats[-1][img_id:img_id + 1, :],
+                    tl_embs[-1][img_id:img_id + 1, :],
+                    br_embs[-1][img_id:img_id + 1, :],
+                    tl_offs[-1][img_id:img_id + 1, :],
+                    br_offs[-1][img_id:img_id + 1, :],
                     img_metas[img_id],
                     rescale=rescale,
                     with_nms=with_nms))
@@ -246,30 +252,25 @@ class CornerHead(nn.Module):
         return result_list
 
     def _get_bboxes_single(self,
-                           tl,
-                           br,
-                           tl_is,
-                           br_is,
+                           tl_heat,
+                           br_heat,
+                           tl_emb,
+                           br_emb,
+                           tl_off,
+                           br_off,
                            img_meta,
                            rescale=False,
                            with_nms=True):
-        tl_heat = tl[:, :self.num_classes, :, :]
-        tl_tag = tl[:, self.num_classes:self.num_classes + self.emb_dim, :, :]
-        tl_regr = tl[:, -self.offset_dim:, :, :]
-        br_heat = br[:, :self.num_classes, :, :]
-        br_tag = br[:, self.num_classes:self.num_classes + self.emb_dim, :, :]
-        br_regr = br[:, -self.offset_dim:, :, :]
-
         if isinstance(img_meta, (list, tuple)):
             img_meta = img_meta[0]
 
         batch_bboxes, batch_scores, batch_clses = decode_heatmap(
             tl_heat=tl_heat.sigmoid(),
             br_heat=br_heat.sigmoid(),
-            tl_tag=tl_tag,
-            br_tag=br_tag,
-            tl_regr=tl_regr,
-            br_regr=br_regr,
+            tl_tag=tl_emb,
+            br_tag=br_emb,
+            tl_regr=tl_off,
+            br_regr=br_off,
             img_meta=img_meta,
             K=self.test_cfg.nms_topk,
             kernel=self.test_cfg.nms_pool_kernel,
