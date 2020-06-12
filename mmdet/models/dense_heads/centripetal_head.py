@@ -118,7 +118,7 @@ class CentripetalHead(CornerHead):
             with_centripetal_shift=True)
 
         mlvl_targets = [targets for _ in range(len(tl_heats))]
-        det_losses, guiding_losses, centripetal_losses, off_losses = multi_apply(
+        det_losses, off_losses, guiding_losses, centripetal_losses = multi_apply(
             self.loss_single,
             tl_heats,
             br_heats,
@@ -192,10 +192,12 @@ class CentripetalHead(CornerHead):
     def get_bboxes(self,
                    tl_heats,
                    br_heats,
-                   tl_embs,
-                   br_embs,
                    tl_offs,
                    br_offs,
+                   tl_guiding_shifts,
+                   br_guiding_shifts,
+                   tl_centripetal_shifts,
+                   br_centripetal_shifts,
                    img_metas,
                    rescale=False,
                    with_nms=True):
@@ -206,10 +208,10 @@ class CentripetalHead(CornerHead):
                 self._get_bboxes_single(
                     tl_heats[-1][img_id:img_id + 1, :],
                     br_heats[-1][img_id:img_id + 1, :],
-                    tl_embs[-1][img_id:img_id + 1, :],
-                    br_embs[-1][img_id:img_id + 1, :],
                     tl_offs[-1][img_id:img_id + 1, :],
                     br_offs[-1][img_id:img_id + 1, :],
+                    tl_centripetal_shifts[-1][img_id:img_id + 1, :],
+                    br_centripetal_shifts[-1][img_id:img_id + 1, :],
                     img_metas[img_id],
                     rescale=rescale,
                     with_nms=with_nms))
@@ -219,10 +221,10 @@ class CentripetalHead(CornerHead):
     def _get_bboxes_single(self,
                            tl_heat,
                            br_heat,
-                           tl_emb,
-                           br_emb,
                            tl_off,
                            br_off,
+                           tl_centripetal_shift,
+                           br_centripetal_shift,
                            img_meta,
                            rescale=False,
                            with_nms=True):
@@ -232,10 +234,12 @@ class CentripetalHead(CornerHead):
         batch_bboxes, batch_scores, batch_clses = decode_heatmap(
             tl_heat=tl_heat.sigmoid(),
             br_heat=br_heat.sigmoid(),
-            tl_tag=tl_emb,
-            br_tag=br_emb,
+            tl_tag=None,
+            br_tag=None,
             tl_regr=tl_off,
             br_regr=br_off,
+            tl_centripetal_shift=tl_centripetal_shift,
+            br_centripetal_shift=br_centripetal_shift,
             img_meta=img_meta,
             K=self.test_cfg.nms_topk,
             kernel=self.test_cfg.nms_pool_kernel,

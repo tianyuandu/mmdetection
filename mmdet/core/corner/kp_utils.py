@@ -25,7 +25,7 @@ def _nms(heat, kernel=3):
     return heat * keep
 
 
-def _tranpose_and_gather_feat(feat, ind):
+def _transpose_and_gather_feat(feat, ind):
     feat = feat.permute(0, 2, 3, 1).contiguous()
     feat = feat.view(feat.size(0), -1, feat.size(3))
     feat = _gather_feat(feat, ind)
@@ -49,11 +49,16 @@ def decode_heatmap(tl_heat,
                    br_tag,
                    tl_regr,
                    br_regr,
-                   img_meta,
+                   tl_centripetal_shift=None,
+                   br_centripetal_shift=None,
+                   img_meta=None,
                    K=100,
                    kernel=3,
                    ae_threshold=0.5,
                    num_dets=1000):
+    with_embedding = tl_tag is not None and br_tag is not None
+    with_centripetal_shift = (tl_centripetal_shift is not None and
+                              br_centripetal_shift is not None)
     batch, _, height, width = tl_heat.size()
     inp_h, inp_w, _ = img_meta['pad_shape']
 
@@ -70,9 +75,9 @@ def decode_heatmap(tl_heat,
     br_xs = br_xs.view(batch, 1, K).expand(batch, K, K)
 
     if tl_regr is not None and br_regr is not None:
-        tl_regr = _tranpose_and_gather_feat(tl_regr, tl_inds)
+        tl_regr = _transpose_and_gather_feat(tl_regr, tl_inds)
         tl_regr = tl_regr.view(batch, K, 1, 2)
-        br_regr = _tranpose_and_gather_feat(br_regr, br_inds)
+        br_regr = _transpose_and_gather_feat(br_regr, br_inds)
         br_regr = br_regr.view(batch, 1, K, 2)
 
         tl_xs = tl_xs + tl_regr[..., 0]
@@ -80,11 +85,28 @@ def decode_heatmap(tl_heat,
         br_xs = br_xs + br_regr[..., 0]
         br_ys = br_ys + br_regr[..., 1]
 
+    if with_centripetal_shift:
+        tl_centripetal_shift = _transpose_and_gather_feat(
+            tl_centripetal_shift, tl_inds).view(batch, K, 1, 2).exp()
+        br_centripetal_shift = _transpose_and_gather_feat(
+            br_centripetal_shift, br_inds).view(batch, 1, K, 2).exp()
+
+        tl_ctxs = tl_xs + tl_centripetal_shift[..., 0]
+        tl_ctys = tl_ys + tl_centripetal_shift[..., 1]
+        br_ctxs = br_xs - br_centripetal_shift[..., 0]
+        br_ctys = br_ys - br_centripetal_shift[..., 1]
+
     # all possible boxes based on top k corners (ignoring class)
     tl_xs *= (inp_w / width)
     tl_ys *= (inp_h / height)
     br_xs *= (inp_w / width)
     br_ys *= (inp_h / height)
+
+    if with_centripetal_shift:
+        tl_ctxs *= (inp_w / width)
+        tl_ctys *= (inp_h / height)
+        br_ctxs *= (inp_w / width)
+        br_ctys *= (inp_h / height)
 
     x_off = img_meta['border'][2]
     y_off = img_meta['border'][0]
@@ -100,12 +122,56 @@ def decode_heatmap(tl_heat,
     br_ys *= br_ys.gt(0.0).type_as(br_ys)
 
     bboxes = torch.stack((tl_xs, tl_ys, br_xs, br_ys), dim=3)
+    area_bboxes = ((br_xs - tl_xs) * (br_ys - tl_ys)).abs()
 
-    tl_tag = _tranpose_and_gather_feat(tl_tag, tl_inds)
-    tl_tag = tl_tag.view(batch, K, 1)
-    br_tag = _tranpose_and_gather_feat(br_tag, br_inds)
-    br_tag = br_tag.view(batch, 1, K)
-    dists = torch.abs(tl_tag - br_tag)
+    if with_centripetal_shift:
+        tl_ctxs -= torch.Tensor([x_off]).type_as(tl_ctxs)
+        tl_ctys -= torch.Tensor([y_off]).type_as(tl_ctys)
+        br_ctxs -= torch.Tensor([x_off]).type_as(br_ctxs)
+        br_ctys -= torch.Tensor([y_off]).type_as(br_ctys)
+
+        tl_ctxs *= tl_ctxs.gt(0.0).type_as(tl_ctxs)
+        tl_ctys *= tl_ctys.gt(0.0).type_as(tl_ctys)
+        br_ctxs *= br_ctxs.gt(0.0).type_as(br_ctxs)
+        br_ctys *= br_ctys.gt(0.0).type_as(br_ctys)
+
+        ct_bboxes = torch.stack((tl_ctxs, tl_ctys, br_ctxs, br_ctys), dim=3)
+        area_ct_bboxes = ((br_ctxs - tl_ctxs) * (br_ctys - tl_ctys)).abs()
+
+        rcentral = torch.zeros_like(ct_bboxes)
+        # magic nums from paper section 4.1
+        mu = torch.ones_like(area_bboxes) / 2.4
+        mu[area_bboxes > 3500] = 1 / 2.1  # large bbox have smaller mu
+
+        bboxes_center_x = (bboxes[..., 0] + bboxes[..., 2]) / 2
+        bboxes_center_y = (bboxes[..., 1] + bboxes[..., 3]) / 2
+        rcentral[..., 0] = bboxes_center_x -  mu * (bboxes[..., 2] -
+                                                    bboxes[..., 0]) / 2
+        rcentral[..., 1] = bboxes_center_y -  mu * (bboxes[..., 3] -
+                                                    bboxes[..., 1]) / 2
+        rcentral[..., 2] = bboxes_center_x +  mu * (bboxes[..., 2] -
+                                                    bboxes[..., 0]) / 2
+        rcentral[..., 3] = bboxes_center_y +  mu * (bboxes[..., 3] -
+                                                    bboxes[..., 1]) / 2
+        area_rcentral = ((rcentral[..., 2] - rcentral[..., 0]) * (
+            rcentral[..., 3] - rcentral[..., 1])).abs()
+        dists = area_ct_bboxes / area_rcentral
+
+        tl_ctx_inds = (ct_bboxes[..., 0] <= rcentral[..., 0]) | (
+                       ct_bboxes[..., 0] >= rcentral[..., 2])
+        tl_cty_inds = (ct_bboxes[..., 1] <= rcentral[..., 1]) | (
+                       ct_bboxes[..., 1] >= rcentral[..., 3])
+        br_ctx_inds = (ct_bboxes[..., 2] <= rcentral[..., 0]) | (
+                       ct_bboxes[..., 2] >= rcentral[..., 2])
+        br_cty_inds = (ct_bboxes[..., 3] <= rcentral[..., 1]) | (
+                       ct_bboxes[..., 3] >= rcentral[..., 3])
+
+    if with_embedding:
+        tl_tag = _tranpose_and_gather_feat(tl_tag, tl_inds)
+        tl_tag = tl_tag.view(batch, K, 1)
+        br_tag = _tranpose_and_gather_feat(br_tag, br_inds)
+        br_tag = br_tag.view(batch, 1, K)
+        dists = torch.abs(tl_tag - br_tag)
 
     tl_scores = tl_scores.view(batch, K, 1).expand(batch, K, K)
     br_scores = br_scores.view(batch, 1, K).expand(batch, K, K)
@@ -118,16 +184,23 @@ def decode_heatmap(tl_heat,
     cls_inds = (tl_clses != br_clses)  # tl and br should have the same class
 
     # reject boxes based on distances
-    dist_inds = (dists > ae_threshold)
+    # both embedding and centripetal shift using ae_threshold
+    dist_inds = dists > ae_threshold
 
     # reject boxes based on widths and heights
     width_inds = (br_xs <= tl_xs)
     height_inds = (br_ys <= tl_ys)
 
     scores[cls_inds] = -1
-    scores[dist_inds] = -1
     scores[width_inds] = -1
     scores[height_inds] = -1
+    scores[dist_inds] = -1
+    if with_centripetal_shift:
+        scores[tl_ctx_inds] = -1
+        scores[tl_cty_inds] = -1
+        scores[br_ctx_inds] = -1
+        scores[br_cty_inds] = -1
+
 
     scores = scores.view(batch, -1)
     scores, inds = torch.topk(scores, num_dets)

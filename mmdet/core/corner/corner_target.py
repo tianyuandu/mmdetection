@@ -81,23 +81,23 @@ def corner_target(gt_bboxes,
 
             if with_guiding_shift:
                 gt_tl_guiding_shift[b_id, 0, tl_y_idx,
-                                    tl_x_idx] = np.log(fctx - ftlx)
+                                    tl_x_idx] = fctx - tl_x_idx
                 gt_tl_guiding_shift[b_id, 1, tl_y_idx,
-                                    tl_x_idx] = np.log(fcty - ftly)
+                                    tl_x_idx] = fcty - tl_y_idx
                 gt_br_guiding_shift[b_id, 0, br_y_idx,
-                                    br_x_idx] = np.log(fbrx - fctx)
+                                    br_x_idx] = br_x_idx - fctx
                 gt_br_guiding_shift[b_id, 1, br_y_idx,
-                                    br_x_idx] = np.log(fbry - fcty)
+                                    br_x_idx] = br_y_idx - fctx
 
             if with_centripetal_shift:
                 gt_tl_centripetal_shift[b_id, 0, tl_y_idx,
-                                        tl_x_idx] = fctx - tl_x_idx
+                                        tl_x_idx] = np.log(fctx - ftlx)
                 gt_tl_centripetal_shift[b_id, 1, tl_y_idx,
-                                        tl_x_idx] = fcty - tl_y_idx
-                gt_br_centripetal_shift[b_id, 0, tl_y_idx,
-                                        tl_x_idx] = br_x_idx - fctx
-                gt_br_centripetal_shift[b_id, 1, tl_y_idx,
-                                        tl_x_idx] = br_y_idx - fctx
+                                        tl_x_idx] = np.log(fcty - ftly)
+                gt_br_centripetal_shift[b_id, 0, br_y_idx,
+                                        br_x_idx] = np.log(fbrx - fctx)
+                gt_br_centripetal_shift[b_id, 1, br_y_idx,
+                                        br_x_idx] = np.log(fbry - fcty)
 
         if with_embedding:
             match.append(corner_match)
