@@ -87,7 +87,7 @@ def corner_target(gt_bboxes,
                 gt_br_guiding_shift[b_id, 0, br_y_idx,
                                     br_x_idx] = br_x_idx - fctx
                 gt_br_guiding_shift[b_id, 1, br_y_idx,
-                                    br_x_idx] = br_y_idx - fctx
+                                    br_x_idx] = br_y_idx - fcty
 
             if with_centripetal_shift:
                 gt_tl_centripetal_shift[b_id, 0, tl_y_idx,
