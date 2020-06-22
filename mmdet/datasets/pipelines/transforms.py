@@ -518,10 +518,8 @@ class RandomCenterCropPad(object):
                         bboxes = results[key][mask]
                         bboxes[:, 0:4:2] += cropped_ctx - left_w - x0
                         bboxes[:, 1:4:2] += cropped_cty - top_h - y0
-                        bboxes[:, 0:4:2] = np.clip(
-                            bboxes[:, 0:4:2], 0, new_w - 1)
-                        bboxes[:, 1:4:2] = np.clip(
-                            bboxes[:, 1:4:2], 0, new_h - 1)
+                        bboxes[:, 0:4:2] = np.clip(bboxes[:, 0:4:2], 0, new_w)
+                        bboxes[:, 1:4:2] = np.clip(bboxes[:, 1:4:2], 0, new_h)
                         keep = (bboxes[:, 2] > bboxes[:, 0]) & (
                             bboxes[:, 3] > bboxes[:, 1])
                         bboxes = bboxes[keep]

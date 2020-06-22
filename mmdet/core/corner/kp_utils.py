@@ -89,10 +89,10 @@ def decode_heatmap(tl_heat,
     x_off = img_meta['border'][2]
     y_off = img_meta['border'][0]
 
-    tl_xs -= torch.Tensor([x_off]).type_as(tl_xs)
-    tl_ys -= torch.Tensor([y_off]).type_as(tl_ys)
-    br_xs -= torch.Tensor([x_off]).type_as(br_xs)
-    br_ys -= torch.Tensor([y_off]).type_as(br_ys)
+    tl_xs -= x_off
+    tl_ys -= y_off
+    br_xs -= x_off
+    br_ys -= y_off
 
     tl_xs *= tl_xs.gt(0.0).type_as(tl_xs)
     tl_ys *= tl_ys.gt(0.0).type_as(tl_ys)

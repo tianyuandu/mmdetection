@@ -170,26 +170,22 @@ class CornerHead(nn.Module):
 
         gt_tl_hmp, gt_br_hmp, gt_tl_off, gt_br_off, match = targets
 
-        pd_tl_hmp = tl[:, :self.num_classes, :, :].sigmoid().clamp(
-            min=1e-4, max=1 - 1e-4)
+        pd_tl_hmp = tl[:, :self.num_classes, :, :].sigmoid()
         pd_tl_emb = tl[:,
                        self.num_classes:self.num_classes+self.emb_dim, :, :]
         pd_tl_off = tl[:, -self.offset_dim:, :, :]
 
-        pd_br_hmp = br[:, :self.num_classes, :, :].sigmoid().clamp(
-            min=1e-4, max=1 - 1e-4)
+        pd_br_hmp = br[:, :self.num_classes, :, :].sigmoid()
         pd_br_emb = br[:,
                        self.num_classes:self.num_classes+self.emb_dim, :, :]
         pd_br_off = br[:, -self.offset_dim:, :, :]
 
-        pd_tl_hmp_is = tl_is[:, :self.num_classes, :, :].sigmoid().clamp(
-            min=1e-4, max=1 - 1e-4)
+        pd_tl_hmp_is = tl_is[:, :self.num_classes, :, :].sigmoid()
         pd_tl_emb_is = tl_is[:, self.num_classes:self.num_classes +
                              self.emb_dim, :, :]
         pd_tl_off_is = tl_is[:, -self.offset_dim:, :, :]
 
-        pd_br_hmp_is = br_is[:, :self.num_classes, :, :].sigmoid().clamp(
-            min=1e-4, max=1 - 1e-4)
+        pd_br_hmp_is = br_is[:, :self.num_classes, :, :].sigmoid()
         pd_br_emb_is = br_is[:, self.num_classes:self.num_classes +
                              self.emb_dim, :, :]
         pd_br_off_is = br_is[:, -self.offset_dim:, :, :]

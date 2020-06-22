@@ -34,8 +34,8 @@ def corner_target(gt_bboxes, gt_labels, feats, imgscale, num_classes=80):
             tl_y_idx = int(min(ftly, h - 1))
             br_y_idx = int(min(fbry, h - 1))
 
-            width = int(fbrx - ftlx + 0.5)
-            height = int(fbry - ftly + 0.5)
+            width = np.ceil(fbrx - ftlx)
+            height = np.ceil(fbry - ftly)
 
             radius = gaussian_radius((height, width), min_overlap=0.3)
             radius = max(0, int(radius))
