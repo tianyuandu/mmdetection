@@ -8,7 +8,7 @@ from torch.nn.modules.utils import _pair
 from mmdet.core import build_bbox_coder, multi_apply, multiclass_nms
 from mmdet.models.builder import HEADS, build_loss
 from mmdet.models.losses import accuracy
-from mmdet.models.utils import FFN, MultiheadAttention
+from mmdet.models.utils import DynamicConv, FFN, MultiheadAttention, build_transformer
 
 
 @HEADS.register_module()
@@ -27,16 +27,24 @@ class DIIHead(nn.Module):
                  roi_feat_size=7,
                  in_channels=256,
                  ffn_act_cfg=dict(type='ReLU', inplace=True),
+                 dynamic_conv_cfg=dict(
+                    type='DynamicConv',
+                    in_channels=256,
+                    feat_channels=64,
+                    out_channels=256,
+                    input_feat_shape=7,
+                    act_cfg=dict(type='ReLU', inplace=True),
+                    norm_cfg=dict(type='LN')),
                  bbox_coder=dict(
                      type='DeltaXYWHBBoxCoder',
                      clip_border=True,
                      target_means=[0., 0., 0., 0.],
                      target_stds=[0.1, 0.1, 0.2, 0.2]),
-                 reg_class_agnostic=False,
-                 reg_decoded_bbox=False,
                  loss_cls=dict(
-                     type='CrossEntropyLoss',
-                     use_sigmoid=False,
+                     type='FocalLoss',
+                     use_sigmoid=True,
+                     gamma=2.0,
+                     alpha=0.25,
                      loss_weight=1.0),
                  loss_bbox=dict(
                      type='SmoothL1Loss', beta=1.0, loss_weight=1.0)):
@@ -45,8 +53,6 @@ class DIIHead(nn.Module):
         self.roi_feat_area = self.roi_feat_size[0] * self.roi_feat_size[1]
         self.in_channels = in_channels
         self.num_classes = num_classes
-        self.reg_class_agnostic = reg_class_agnostic
-        self.reg_decoded_bbox = reg_decoded_bbox
         self.fp16_enabled = False
 
         self.bbox_coder = build_bbox_coder(bbox_coder)
@@ -63,33 +69,37 @@ class DIIHead(nn.Module):
         self.self_attention = MultiheadAttention(
             hidden_channels, num_heads, dropout)
         self.self_attention_norm = build_norm_layer(
-            dict(type='LN'), hidden_channels)
+            dict(type='LN'), hidden_channels)[1]
 
         # self.instance_interactive_conv = DynamicConv()
-        self.instance_interactive_conv = nn.Conv2d(1, 1, 0)
+        self.instance_interactive_conv = build_transformer(dynamic_conv_cfg)
         self.instance_interactive_conv_dropout = nn.Dropout(dropout)
         self.instance_interactive_conv_norm = build_norm_layer(
-            dict(type='LN'), hidden_channels)
+            dict(type='LN'), hidden_channels)[1]
 
         self.ffn = FFN(hidden_channels, feedforward_channels, num_fcs,
             act_cfg=ffn_act_cfg, dropout=dropout)
-        self.ffn_norm = build_norm_layer(dict(type='LN'), hidden_channels)
+        self.ffn_norm = build_norm_layer(dict(type='LN'), hidden_channels)[1]
 
         self.cls_fcs = nn.ModuleList()
         for _ in range(num_cls_fcs):
             self.cls_fcs.append(
                 nn.Linear(hidden_channels, hidden_channels, bias=False))
             self.cls_fcs.append(
-                build_norm_layer(dict(type='LN'), hidden_channels))
+                build_norm_layer(dict(type='LN'), hidden_channels)[1])
             self.cls_fcs.append(
                 build_activation_layer(dict(type='ReLU', inplace=True)))
+        if self.loss_cls.use_sigmoid:
+            self.cls_head = nn.Linear(hidden_channels, self.num_classes)
+        else:
+            self.cls_head = nn.Linear(hidden_channels, self.num_classes + 1)
 
         self.reg_fcs = nn.ModuleList()
         for _ in range(num_reg_fcs):
             self.reg_fcs.append(
                 nn.Linear(hidden_channels, hidden_channels, bias=False))
             self.reg_fcs.append(
-                build_norm_layer(dict(type='LN'), hidden_channels))
+                build_norm_layer(dict(type='LN'), hidden_channels)[1])
             self.reg_fcs.append(
                 build_activation_layer(dict(type='ReLU', inplace=True)))
         self.bboxes_delta = nn.Linear(hidden_channels, 4)

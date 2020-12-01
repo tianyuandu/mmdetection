@@ -17,9 +17,9 @@ model = dict(
         type='FPN',
         in_channels=[256, 512, 1024, 2048],
         out_channels=256,
-        start_level=1,
+        start_level=0,
         add_extra_convs='on_input',
-        num_outs=5),
+        num_outs=4),
     bbox_head=dict(
         type='SparseRCNNHead',
         num_stages=6,
@@ -42,7 +42,21 @@ model = dict(
             hidden_channels=256,
             dropout=0.0,
             roi_feat_size=7,
-            ffn_act_cfg=dict(type='ReLU', inplace=True))))
+            ffn_act_cfg=dict(type='ReLU', inplace=True),
+            dynamic_conv_cfg=dict(
+                type='DynamicConv',
+                in_channels=256,
+                feat_channels=64,
+                out_channels=256,
+                input_feat_shape=7,
+                act_cfg=dict(type='ReLU', inplace=True),
+                norm_cfg=dict(type='LN')),
+            loss_cls=dict(
+                type='FocalLoss',
+                use_sigmoid=True,
+                gamma=2.0,
+                alpha=0.25,
+                loss_weight=1.0))))
 
 # training and testing settings
 train_cfg = None

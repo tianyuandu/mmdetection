@@ -68,6 +68,9 @@ class SparseRCNNHead(CascadeRoIHead):
         self.init_proposal_features = nn.Embedding(
             self.num_proposals, self.proposal_feature_channel)
 
+    def init_weights(self):
+        super(SparseRCNNHead, self).init_weights(pretrained=False)
+        
     def init_proposal_weights(self):
         """Initialize the weights in proposal layers."""
         nn.init.constant_(self.init_proposal_bboxes.weight[:, :2], 0.5)
