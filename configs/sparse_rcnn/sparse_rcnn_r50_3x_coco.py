@@ -35,13 +35,14 @@ model = dict(
             type='DIIHead',
             num_classes=80,
             num_fcs=2,
+            num_heads=8,
             num_cls_fcs=1,
             num_reg_fcs=3,
             feedforward_channels=2048,
+            hidden_channels=256,
             dropout=0.0,
             roi_feat_size=7,
-            act_cfg=dict(type='ReLU', inplace=True),
-            norm_cfg=dict(type='LN'))))
+            ffn_act_cfg=dict(type='ReLU', inplace=True))))
 
 # training and testing settings
 train_cfg = None

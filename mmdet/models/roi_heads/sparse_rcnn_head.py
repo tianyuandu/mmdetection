@@ -30,13 +30,14 @@ class SparseRCNNHead(CascadeRoIHead):
                     type='DIIHead',
                     num_classes=80,
                     num_fcs=2,
+                    num_heads=8,
                     num_cls_fcs=1,
                     num_reg_fcs=3,
                     feedforward_channels=2048,
+                    hidden_channels=256,
                     dropout=0.0,
                     roi_feat_size=7,
-                    act_cfg=dict(type='ReLU', inplace=True),
-                    norm_cfg=dict(type='LN'),
+                    ffn_act_cfg=dict(type='ReLU', inplace=True),
                     loss_cls=dict(),
                     loss_bbox=dict(),
                     loss_iou=dict()),
@@ -50,28 +51,25 @@ class SparseRCNNHead(CascadeRoIHead):
         self.stage_loss_weights = stage_loss_weights
         self.num_proposals = num_proposals
         self.proposal_feature_channel = proposal_feature_channel
-        self.init_proposal_layers()
         super(SparseRCNNHead, self).__init__(
+            num_stages,
+            stage_loss_weights,
             bbox_roi_extractor=bbox_roi_extractor,
             bbox_head=bbox_head,
             mask_roi_extractor=mask_roi_extractor,
             mask_head=mask_head,
             train_cfg=train_cfg,
             test_cfg=test_cfg)
+        self.init_proposal_layers()
+        self.init_proposal_weights()
 
     def init_proposal_layers(self):
         self.init_proposal_bboxes = nn.Embedding(self.num_proposals, 4)
         self.init_proposal_features = nn.Embedding(
             self.num_proposals, self.proposal_feature_channel)
 
-    def init_weights(self, pretrained):
-        """Initialize the weights in head.
-
-        Args:
-            pretrained (str, optional): Path to pre-trained weights.
-                Defaults to None.
-        """
-        super(SparseRCNNHead, self).init_weights(pretrained)
+    def init_proposal_weights(self):
+        """Initialize the weights in proposal layers."""
         nn.init.constant_(self.init_proposal_bboxes.weight[:, :2], 0.5)
         nn.init.constant_(self.init_proposal_bboxes.weight[:, 2:], 1)
 

@@ -41,9 +41,6 @@ class DIIHead(nn.Module):
                  loss_bbox=dict(
                      type='SmoothL1Loss', beta=1.0, loss_weight=1.0)):
         super(DIIHead, self).__init__()
-        assert with_cls or with_reg
-        self.with_cls = with_cls
-        self.with_reg = with_reg
         self.roi_feat_size = _pair(roi_feat_size)
         self.roi_feat_area = self.roi_feat_size[0] * self.roi_feat_size[1]
         self.in_channels = in_channels
@@ -61,13 +58,6 @@ class DIIHead(nn.Module):
         #     self.avg_pool = nn.AvgPool2d(self.roi_feat_size)
         # else:
         #     in_channels *= self.roi_feat_area
-        if self.with_cls:
-            # need to add background class
-            self.fc_cls = nn.Linear(in_channels, num_classes + 1)
-        if self.with_reg:
-            out_dim_reg = 4 if reg_class_agnostic else 4 * num_classes
-            self.fc_reg = nn.Linear(in_channels, out_dim_reg)
-        self.debug_imgs = None
 
         # start
         self.self_attention = MultiheadAttention(
