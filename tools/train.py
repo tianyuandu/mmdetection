@@ -154,12 +154,6 @@ def main():
     model = build_detector(
         cfg.model, train_cfg=cfg.train_cfg, test_cfg=cfg.test_cfg)
 
-    import pdb
-    pdb.set_trace()
-    rank = torch.distributed.get_rank()
-    from mmcv.runner import save_checkpoint
-    save_checkpoint(model, f'sparse_rcnn_{rank}.pth')
-
     datasets = [build_dataset(cfg.data.train)]
     if len(cfg.workflow) == 2:
         val_dataset = copy.deepcopy(cfg.data.val)

@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
 
-from mmdet.core import (bbox2result, bbox2roi, bbox_mapping, build_assigner,
-                        build_sampler, merge_aug_bboxes, merge_aug_masks,
-                        multiclass_nms)
+from mmdet.core import (bbox2result, bbox2roi, bbox_mapping, build_bbox_coder,
+                        merge_aug_bboxes, merge_aug_masks, multiclass_nms)
 from ..builder import HEADS, build_head, build_roi_extractor
 from .cascade_roi_head import CascadeRoIHead
 
@@ -41,6 +40,11 @@ class SparseRCNNHead(CascadeRoIHead):
                     loss_cls=dict(),
                     loss_bbox=dict(),
                     loss_iou=dict()),
+                 bbox_coder=dict(
+                    type='DeltaXYWHBBoxCoder',
+                    clip_border=False,
+                    target_means=[0., 0., 0., 0.],
+                    target_stds=[0.5, 0.5, 1., 1.]),
                  mask_roi_extractor=None,
                  mask_head=None,
                  train_cfg=None,
@@ -60,17 +64,18 @@ class SparseRCNNHead(CascadeRoIHead):
             mask_head=mask_head,
             train_cfg=train_cfg,
             test_cfg=test_cfg)
+        self.bbox_coder = build_bbox_coder(bbox_coder)
         self.init_proposal_layers()
         self.init_proposal_weights()
+
+    def init_weights(self):
+        super(SparseRCNNHead, self).init_weights(pretrained=False)
 
     def init_proposal_layers(self):
         self.init_proposal_bboxes = nn.Embedding(self.num_proposals, 4)
         self.init_proposal_features = nn.Embedding(
             self.num_proposals, self.proposal_feature_channel)
 
-    def init_weights(self):
-        super(SparseRCNNHead, self).init_weights(pretrained=False)
-        
     def init_proposal_weights(self):
         """Initialize the weights in proposal layers."""
         nn.init.constant_(self.init_proposal_bboxes.weight[:, :2], 0.5)
@@ -129,7 +134,7 @@ class SparseRCNNHead(CascadeRoIHead):
         # bbox head
         outs = ()
         proposals = self._decode_init_proposals()
-        rois = bbox2roi([proposals])
+        rois = bbox2roi(proposals)
         if self.with_bbox:
             for i in range(self.num_stages):
                 bbox_results = self._bbox_forward(i, x, rois)
@@ -143,34 +148,46 @@ class SparseRCNNHead(CascadeRoIHead):
                 outs = outs + (mask_results['mask_pred'], )
         return outs
 
-    def _bbox_forward(self, stage, x, rois, proposal_features):
+    def _bbox_forward(self, stage, x, proposals, proposal_features):
         """Box head forward function used in both training and testing."""
+        N = len(proposals)
+        num_proposals = proposals[0].shape[0]
+        rois = bbox2roi(proposals)
+
         bbox_roi_extractor = self.bbox_roi_extractor[stage]
         bbox_head = self.bbox_head[stage]
         bbox_feats = bbox_roi_extractor(x[:bbox_roi_extractor.num_inputs],
                                         rois)
         # do not support caffe_c4 model anymore
-        cls_score, bbox_pred, proposal_features = bbox_head(bbox_feats,
-                                                            proposal_features)
+        cls_score, bbox_delta, proposal_features = bbox_head(bbox_feats,
+                                                             proposal_features)
+
+        bbox_pred = self.bbox_coder.decode(
+            torch.cat(proposals, dim=0),
+            bbox_delta.view(-1, 4),
+            wh_ratio_clip=16 / 100000)
+        bbox_pred = bbox_pred.view(N, num_proposals, -1).unbind(0)
 
         bbox_results = dict(
             cls_score=cls_score, bbox_pred=bbox_pred, bbox_feats=bbox_feats,
             proposal_features=proposal_features)
+
         return bbox_results
 
     def _bbox_forward_train(self, stage, x, proposals, proposal_features,
-                            gt_bboxes, gt_labels, rcnn_train_cfg):
+                            gt_bboxes, gt_labels):
         """Run forward function and calculate loss for box head in training."""
-        rois = bbox2roi(proposals)
-        bbox_results = self._bbox_forward(stage, x, rois, proposal_features)
-        bbox_targets = self.bbox_head[stage].get_targets(
-            sampling_results, gt_bboxes, gt_labels, rcnn_train_cfg)
-        loss_bbox = self.bbox_head[stage].loss(bbox_results['cls_score'],
-                                               bbox_results['bbox_pred'], rois,
-                                               *bbox_targets)
+        bbox_results = self._bbox_forward(stage, x, proposals, proposal_features)
 
-        bbox_results.update(
-            loss_bbox=loss_bbox, rois=rois, bbox_targets=bbox_targets)
+        # TODO
+        # bbox_targets = self.bbox_head[stage].get_targets(
+        #     gt_bboxes, gt_labels)
+        # loss_bbox = self.bbox_head[stage].loss(bbox_results['cls_score'],
+        #                                        bbox_results['bbox_pred'], rois,
+        #                                        *bbox_targets)
+
+        # bbox_results.update(
+        #     loss_bbox=loss_bbox, rois=rois, bbox_targets=bbox_targets)
         return bbox_results
 
     def _mask_forward(self, stage, x, rois):
@@ -206,13 +223,18 @@ class SparseRCNNHead(CascadeRoIHead):
         mask_results.update(loss_mask=loss_mask)
         return mask_results
 
-    def _decode_init_proposals(self):
+    def _decode_init_proposals(self, img_metas=None):
         proposals = self.init_proposal_bboxes.weight.clone()
         x_center, y_center, w, h = proposals.unbind(-1)
         proposals = torch.stack(
             [(x_center - 0.5 * w), (y_center - 0.5 * h),
              (x_center + 0.5 * w), (y_center + 0.5 * h)], dim=-1)
-        proposals = proposals[None] # * img_metas['pad_shape'][:, None, :]  # TODO
+        if img_metas is not None:
+            if not isinstance(img_metas, list):
+                img_metas = [img_metas]
+            wh = img_metas[0]['batch_intput_shape'][:2]
+            whwh = torch.tensor(wh + wh).type_as(proposals)
+            proposals = proposals * whwh
         return proposals
 
     def forward_train(self,
@@ -243,15 +265,15 @@ class SparseRCNNHead(CascadeRoIHead):
         """
         # Decode initial proposals
         num_imgs = len(img_metas)
-        proposals = self._decode_init_proposals()
-        proposals = [proposals.clone() for _ in range(num_ings)]
+        proposals = self._decode_init_proposals(img_metas)
+        proposals = [proposals.clone() for _ in range(num_imgs)]
 
         proposal_feats = self.init_proposal_features.weight
+        proposal_feats = proposal_feats[None].repeat(num_imgs, 1, 1)
 
         losses = dict()
         for i in range(self.num_stages):
             self.current_stage = i
-            rcnn_train_cfg = self.train_cfg[i]
             lw = self.stage_loss_weights[i]
 
             if self.with_bbox or self.with_mask:
@@ -261,12 +283,11 @@ class SparseRCNNHead(CascadeRoIHead):
             # bbox head forward and loss
             bbox_results = self._bbox_forward_train(i, x, proposals,
                                                     proposal_feats,
-                                                    gt_bboxes, gt_labels,
-                                                    rcnn_train_cfg)
+                                                    gt_bboxes, gt_labels)
 
-            for name, value in bbox_results['loss_bbox'].items():
-                losses[f's{i}.{name}'] = (
-                    value * lw if 'loss' in name else value)
+            # for name, value in bbox_results['loss_bbox'].items():
+            #     losses[f's{i}.{name}'] = (
+            #         value * lw if 'loss' in name else value)
 
             # mask head forward and loss
             if self.with_mask:
@@ -277,52 +298,56 @@ class SparseRCNNHead(CascadeRoIHead):
                     losses[f's{i}.{name}'] = (
                         value * lw if 'loss' in name else value)
 
-            # refine bboxes
-            # if i < self.num_stages - 1:
-            #     pos_is_gts = [res.pos_is_gt for res in sampling_results]
-            #     # bbox_targets is a tuple
-            #     roi_labels = bbox_results['bbox_targets'][0]
-            #     with torch.no_grad():
-            #         roi_labels = torch.where(
-            #             roi_labels == self.bbox_head[i].num_classes,
-            #             bbox_results['cls_score'][:, :-1].argmax(1),
-            #             roi_labels)
-            #         proposal_list = self.bbox_head[i].refine_bboxes(
-            #             bbox_results['rois'], roi_labels,
-            #             bbox_results['bbox_pred'], pos_is_gts, img_metas)
-
             proposals = bbox_results['bbox_pred']
-            proposal_feats = bbox_results['obj_feature']
+            proposal_feats = bbox_results['proposal_features']
         return losses
 
-    def simple_test(self, x, proposal_list, img_metas, rescale=False):
+    def simple_test(self, x, img_metas, rescale=False):
         """Test without augmentation."""
         assert self.with_bbox, 'Bbox head must be implemented.'
-        num_imgs = len(proposal_list)
+        # Decode initial proposals
+        num_imgs = len(img_metas)
+        proposals = self._decode_init_proposals(img_metas)
+        proposals = [proposals.clone() for _ in range(num_imgs)]
+
+        proposal_feats = self.init_proposal_features.weight
+        proposal_feats = proposal_feats[None].repeat(num_imgs, 1, 1)
+
+        ms_bbox_result = {}
+        ms_segm_result = {}
+        ms_scores = []
+        for i in range(self.num_stages):
+            self.current_stage = i
+            # bbox head forward
+            bbox_results = self._bbox_forward(i, x, proposals, proposal_feats)
+
+            proposals = bbox_results['bbox_pred']
+            proposal_feats = bbox_results['proposal_features']
+
+        cls_score = bbox_results['cls_score']
+        bbox_pred = bbox_results['bbox_pred']
+        import pdb
+        pdb.set_trace()
+        if self.bbox_head.loss_cls.use_sigmoid:
+            cls_score = cls_score.sigmoid()
+
+        '''
         img_shapes = tuple(meta['img_shape'] for meta in img_metas)
         ori_shapes = tuple(meta['ori_shape'] for meta in img_metas)
         scale_factors = tuple(meta['scale_factor'] for meta in img_metas)
 
         # "ms" in variable names means multi-stage
-        ms_bbox_result = {}
-        ms_segm_result = {}
-        ms_scores = []
-        rcnn_test_cfg = self.test_cfg
 
-        rois = bbox2roi(proposal_list)
         for i in range(self.num_stages):
-            bbox_results = self._bbox_forward(i, x, rois)
 
             # split batch bbox prediction back to each image
-            cls_score = bbox_results['cls_score']
-            bbox_pred = bbox_results['bbox_pred']
             num_proposals_per_img = tuple(
                 len(proposals) for proposals in proposal_list)
             rois = rois.split(num_proposals_per_img, 0)
             cls_score = cls_score.split(num_proposals_per_img, 0)
             if isinstance(bbox_pred, torch.Tensor):
                 bbox_pred = bbox_pred.split(num_proposals_per_img, 0)
-            else:
+           else:
                 bbox_pred = self.bbox_head[i].bbox_pred_split(
                     bbox_pred, num_proposals_per_img)
             ms_scores.append(cls_score)
@@ -418,6 +443,7 @@ class SparseRCNNHead(CascadeRoIHead):
                 zip(ms_bbox_result['ensemble'], ms_segm_result['ensemble']))
         else:
             results = ms_bbox_result['ensemble']
+        '''
 
         return results
 
@@ -427,6 +453,7 @@ class SparseRCNNHead(CascadeRoIHead):
         If rescale is False, then returned bboxes and masks will fit the scale
         of imgs[0].
         """
+        '''
         rcnn_test_cfg = self.test_cfg
         aug_bboxes = []
         aug_scores = []
@@ -513,3 +540,5 @@ class SparseRCNNHead(CascadeRoIHead):
             return [(bbox_result, segm_result)]
         else:
             return [bbox_result]
+        '''
+        raise NotImplementedError

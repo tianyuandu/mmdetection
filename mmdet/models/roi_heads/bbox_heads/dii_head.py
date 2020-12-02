@@ -35,11 +35,6 @@ class DIIHead(nn.Module):
                     input_feat_shape=7,
                     act_cfg=dict(type='ReLU', inplace=True),
                     norm_cfg=dict(type='LN')),
-                 bbox_coder=dict(
-                     type='DeltaXYWHBBoxCoder',
-                     clip_border=True,
-                     target_means=[0., 0., 0., 0.],
-                     target_stds=[0.1, 0.1, 0.2, 0.2]),
                  loss_cls=dict(
                      type='FocalLoss',
                      use_sigmoid=True,
@@ -53,9 +48,9 @@ class DIIHead(nn.Module):
         self.roi_feat_area = self.roi_feat_size[0] * self.roi_feat_size[1]
         self.in_channels = in_channels
         self.num_classes = num_classes
+        self.hidden_channels = hidden_channels
         self.fp16_enabled = False
 
-        self.bbox_coder = build_bbox_coder(bbox_coder)
         self.loss_cls = build_loss(loss_cls)
         self.loss_bbox = build_loss(loss_bbox)
 
@@ -109,11 +104,42 @@ class DIIHead(nn.Module):
         pass  # TODO
 
     @auto_fp16()
-    def forward(self, x):
-        x = x.view(x.size(0), -1)
-        cls_score = self.fc_cls(x) if self.with_cls else None
-        bbox_pred = self.fc_reg(x) if self.with_reg else None
-        return cls_score, bbox_pred
+    def forward(self, roi_feat, proposal_feat):
+        N, num_proposals = proposal_feat.shape[:2]
+        # Self attention
+        proposal_feat = proposal_feat.view(
+            N, num_proposals, self.hidden_channels).permute(1, 0, 2)
+        proposal_feat = self.self_attention_norm(
+            self.self_attention(proposal_feat))
+        
+        # instance interactive
+        proposal_feat = proposal_feat.view(
+            num_proposals, N, self.hidden_channels).permute(1, 0, 2).reshape(
+            1, N * num_proposals, self.hidden_channels)
+        roi_feat = roi_feat.view(
+            N * num_proposals, self.hidden_channels, -1).permute(2, 0, 1)
+        proposal_feat_iic = self.instance_interactive_conv(
+            proposal_feat, roi_feat)
+        proposal_feat = proposal_feat + self.instance_interactive_conv_dropout(
+            proposal_feat_iic)
+        obj_feat = self.instance_interactive_conv_norm(proposal_feat)
+
+        # FFN
+        obj_feat = self.ffn_norm(self.ffn(obj_feat))
+
+        fc_feat = obj_feat.transpose(0, 1).reshape(N * num_proposals, -1)
+        cls_feat = fc_feat.clone()
+        reg_feat = fc_feat.clone()
+
+        for cls_layer in self.cls_fcs:
+            cls_feat = cls_layer(cls_feat)
+        for reg_layer in self.reg_fcs:
+            reg_feat = reg_layer(reg_feat)
+
+        cls_score = self.cls_head(cls_feat).view(N, num_proposals, -1)
+        bbox_delta = self.bboxes_delta(reg_feat).view(N, num_proposals, -1)
+
+        return cls_score, bbox_delta, obj_feat.view(N, num_proposals, -1)
 
     def _get_target_single(self, pos_bboxes, neg_bboxes, pos_gt_bboxes,
                            pos_gt_labels, cfg):

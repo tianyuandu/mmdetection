@@ -20,6 +20,7 @@ from .reppoints_detector import RepPointsDetector
 from .retinanet import RetinaNet
 from .rpn import RPN
 from .single_stage import SingleStageDetector
+from .sparse_rcnn import SparseRCNN
 from .two_stage import TwoStageDetector
 from .vfnet import VFNet
 from .yolact import YOLACT

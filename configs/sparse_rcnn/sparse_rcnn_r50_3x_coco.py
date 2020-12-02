@@ -2,7 +2,7 @@ _base_ = [
     '../_base_/datasets/coco_detection.py', '../_base_/default_runtime.py'
 ]
 model = dict(
-    type='SingleStageDetector',
+    type='SparseRCNN',
     pretrained='/mnt/lustre/share/DSK/model_zoo/pytorch/imagenet/resnet50-19c8e357.pth',
     backbone=dict(
         type='ResNet',
@@ -56,7 +56,12 @@ model = dict(
                 use_sigmoid=True,
                 gamma=2.0,
                 alpha=0.25,
-                loss_weight=1.0))))
+                loss_weight=1.0)),
+        bbox_coder=dict(
+            type='DeltaXYWHBBoxCoder',
+            clip_border=False,
+            target_means=[0., 0., 0., 0.],
+            target_stds=[0.5, 0.5, 1., 1.])))
 
 # training and testing settings
 train_cfg = None
@@ -125,19 +130,19 @@ test_pipeline = [
         ])
 ]
 data = dict(
-    samples_per_gpu=4,
-    workers_per_gpu=4,
+    samples_per_gpu=2,
+    workers_per_gpu=2,
     train=dict(pipeline=train_pipeline),
     val=dict(pipeline=test_pipeline),
     test=dict(pipeline=test_pipeline))
 # optimizer
 optimizer = dict(
     type='AdamW',
-    lr=0.0001,
+    lr=0.000025,
     weight_decay=0.0001,
     paramwise_cfg=dict(
         custom_keys={'backbone': dict(lr_mult=0.1, decay_mult=1.0)}))
 optimizer_config = dict(grad_clip=dict(max_norm=0.1, norm_type=2))
 # learning policy
-lr_config = dict(policy='step', step=[100])
-total_epochs = 150
+lr_config = dict(policy='step', step=[27, 33])
+total_epochs = 36
