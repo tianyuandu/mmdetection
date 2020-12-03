@@ -166,7 +166,7 @@ class SparseRCNNHead(CascadeRoIHead):
             torch.cat(proposals, dim=0),
             bbox_delta.view(-1, 4),
             wh_ratio_clip=16 / 100000)
-        bbox_pred = bbox_pred.view(N, num_proposals, -1).unbind(0)
+        bbox_pred = bbox_pred.view(N, num_proposals, -1).detach().unbind(0)
 
         bbox_results = dict(
             cls_score=cls_score, bbox_pred=bbox_pred, bbox_feats=bbox_feats,
@@ -318,7 +318,6 @@ class SparseRCNNHead(CascadeRoIHead):
         ms_scores = []
         for i in range(self.num_stages):
             self.current_stage = i
-            # bbox head forward
             bbox_results = self._bbox_forward(i, x, proposals, proposal_feats)
 
             proposals = bbox_results['bbox_pred']
@@ -326,11 +325,36 @@ class SparseRCNNHead(CascadeRoIHead):
 
         cls_score = bbox_results['cls_score']
         bbox_pred = bbox_results['bbox_pred']
-        import pdb
-        pdb.set_trace()
-        if self.bbox_head.loss_cls.use_sigmoid:
-            cls_score = cls_score.sigmoid()
+        num_classes = self.bbox_head[-1].num_classes
+        det_bboxes = []
+        det_labels = []
 
+        if self.bbox_head[-1].loss_cls.use_sigmoid:
+            cls_score = cls_score.sigmoid()
+            labels = torch.arange(num_classes)[None].repeat(
+                self.num_proposals, 1).flatten(0, 1).type_as(proposal_feats)
+
+            for img_id in range(num_imgs):
+                cls_score_per_img = cls_score[img_id]
+                scores_per_img, topk_indices = cls_score_per_img.flatten(
+                    0, 1).topk(self.test_cfg.max_per_img, sorted=False)
+                labels_per_img = labels[topk_indices]
+                bbox_pred_per_img = bbox_pred[img_id].view(-1, 1, 4).repeat(
+                    1, num_classes, 1).view(-1, 4)[topk_indices]
+                if rescale:
+                    scale_factor = img_metas[img_id]['scale_factor']
+                    bbox_pred_per_img /= bbox_pred_per_img.new_tensor(
+                        scale_factor)
+                det_bboxes.append(
+                    torch.cat([bbox_pred_per_img, scores_per_img[:, None]], dim=1))
+                det_labels.append(labels_per_img)
+
+        bbox_results = [
+            bbox2result(det_bboxes[i], det_labels[i], num_classes)
+            for i in range(num_imgs)
+        ]
+
+        return bbox_results
         '''
         img_shapes = tuple(meta['img_shape'] for meta in img_metas)
         ori_shapes = tuple(meta['ori_shape'] for meta in img_metas)
@@ -444,8 +468,6 @@ class SparseRCNNHead(CascadeRoIHead):
         else:
             results = ms_bbox_result['ensemble']
         '''
-
-        return results
 
     def aug_test(self, features, proposal_list, img_metas, rescale=False):
         """Test with augmentations.

@@ -26,7 +26,7 @@ class SparseRCNN(SingleStageDetector):
                 corresponds to each class.
         """
         x = self.extract_feat(img)
-        bbox_list = self.bbox_head.simple_test(x, img_metas, rescale=rescale)
+        bbox_results = self.bbox_head.simple_test(x, img_metas, rescale=rescale)
 
         # bbox_results = [
         #     bbox2result(det_bboxes, det_labels, self.bbox_head.num_classes)
