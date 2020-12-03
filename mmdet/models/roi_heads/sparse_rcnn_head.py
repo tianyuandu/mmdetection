@@ -232,7 +232,8 @@ class SparseRCNNHead(CascadeRoIHead):
         if img_metas is not None:
             if not isinstance(img_metas, list):
                 img_metas = [img_metas]
-            wh = img_metas[0]['batch_intput_shape'][:2]
+            # wh = img_metas[0]['batch_intput_shape'][:2][::-1]
+            wh = img_metas[0]['img_shape'][:2][::-1]
             whwh = torch.tensor(wh + wh).type_as(proposals)
             proposals = proposals * whwh
         return proposals
